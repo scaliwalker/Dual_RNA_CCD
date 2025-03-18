@@ -1,0 +1,55 @@
+ES_plotMD_ggplot <- function(qlf_object, n = 10, group = "name") {
+  
+  results <- topTags(qlf_object, n=Inf)$table  # Ottieni tutti i geni
+  
+  if (!group %in% colnames(qlf_object$genes)) {
+    stop(paste("Error: the feature", group, "non esiste in qlf3$genes"))
+  }
+  
+  results$gene <- rownames(results)  # Usa rownames per identificare i geni
+  results$annotation <- qlf_object$genes[rownames(results), group]  # Prendi il valore dalla colonna scelta
+  
+  results$Significance <- "NotSig"
+  results$Significance[results$logFC > 1 & results$FDR < 0.05] <- "Up"
+  results$Significance[results$logFC < -1 & results$FDR < 0.05] <- "Down"
+  
+  top_up <- results %>% filter(Significance == "Up") %>% slice_max(logFC, n = n)
+  top_down <- results %>% filter(Significance == "Down") %>% slice_min(logFC, n = n)
+
+  top_genes <- bind_rows(top_up, top_down)
+
+  md_df <- results %>%
+    dplyr::select(logCPM, logFC, Significance, gene, annotation)  # Usa l'annotazione scelta
+  
+  p <- ggplot(md_df, aes(x = logCPM, y = logFC)) +
+  
+  geom_point(data = md_df %>% filter(Significance == "NotSig"), 
+             aes(color = Significance), alpha = 0.3, size = 1) +  
+  geom_point(data = md_df %>% filter(Significance == "Up"), 
+             aes(color = Significance), alpha = 0.8, size = 1.2) +  
+  geom_point(data = md_df %>% filter(Significance == "Down"), 
+             aes(color = Significance), alpha = 0.8, size = 1.2) +  
+  
+  scale_color_manual(
+    values = c("Up" = "blue", "NotSig" = "black", "Down" = "red"),
+    limits = c("Up", "NotSig", "Down")  # Imposta l'ordine
+  ) + 
+  
+  theme_minimal() +
+  labs(
+    x = "Average log CPM",
+    y = "log-fold-change",
+    color = "Significance"
+  ) +
+  
+  geom_hline(yintercept = c(-1, 1), linetype = "dashed", color = "blue") +  
+  
+  geom_text_repel(
+    data = md_df %>% filter(gene %in% top_genes$gene), 
+    aes(x = logCPM, y = logFC, label = annotation, color = Significance),  
+    size = 3, max.overlaps = 15, force = 2, 
+    inherit.aes = FALSE, show.legend = FALSE  
+  )
+
+  return(p)  # Restituisci l'oggetto ggplot
+}

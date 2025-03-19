@@ -1,0 +1,112 @@
+############################################
+#
+# Dual RNA-Seq Cypress Cancker Disease
+# Edoardo Scali
+#
+############################################
+
+#---------------------------
+# Install and load all required libraries
+#---------------------------
+```{r}
+if (!requireNamespace("BiocManager"))
+  install.packages("BiocManager")
+
+list.of.packages <- c("limma", "rtracklayer", "Rsubread", "genefilter", "janitor", "DESeq2", "easypackages", "RColorBrewer", "AnnotationDbi", "easypackages","edgeR","scales","enrichR","rtracklayer","ggvenn","PCAtools","WGCNA", "genefilter","reshape2","Cairo","RColorBrewer", "ggsci",    "ggplot2","EDASeq","dendextend","ggplot2","cowplot","pheatmap","beeswarm", "sva", "GlimmaV2", "rctutils", "gplots", "pheatmap", "clusterProfiler","dplyr", "tidyverse")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) BiocManager::install(new.packages)
+
+#Load all required packages using easypackages
+easypackages::libraries(list.of.packages)
+
+set.seed(123)
+```
+
+
+#**************************************
+#
+# Load data 494 ----
+#
+#**************************************
+
+```{r}
+rawdata <- read.delim("494/pathogen_counts.txt", skip = 1, header = T) # import the featureCount table 
+names(rawdata)
+
+# Fix sample names
+
+names(rawdata) <- sub('BAM_FILE.', '', names(rawdata))
+names(rawdata) <- sub('.bam', '', names(rawdata)) 
+
+rawdata <- rawdata %>%
+  clean_names() # clean names!
+
+```
+
+#---
+### Load metadata  
+#---
+```{r Load metadata}
+metadata <- readr::read_csv("494/cypress_treatments.csv") %>%
+  dplyr::select(1:5) %>%
+  mutate_if(is.character, as.factor) %>%
+  clean_names()
+```
+
+
+
+#---
+### 2.3 Load annotation 
+#---
+```{r Load annotation}
+# GTF
+gtf_file <- rtracklayer::readGFF("494/494.gtf") %>%
+  clean_names()
+
+gtf_file$ontology_term[45:50] #check if all the informations are present! 
+gtf_file$product
+gtf_file$geneid <- gtf_file$gene_id # same rawdata and annotation have same geneid variable name
+
+as.data.frame(gtf_file)
+
+gtf_filtered <- gtf_file %>%
+  dplyr::filter(!is.na(product) & !is.na(gbkey))
+```
+
+
+
+```{r}
+# This step is required in order to keep the annotation just for the genomic feature used to count RNA with featureCount. The reason I am doing this is because I need to have same length for count table and gff file in order to incorporate both of them in the DGEList object! 
+
+missing_geneids <- setdiff(rawdata$geneid, gtf_filtered$geneid) # are there any missing ids? 
+
+# No missing IDs, but the annotation files has some repetition in the geneid variable. I need to remove the duplicates!
+gtf_filtered_2 <- gtf_filtered %>%
+  distinct(geneid, .keep_all = TRUE) %>% # remove duplicates 
+  arrange(geneid) # make sure that they are in order! 
+
+rawdata <- rawdata %>%
+  arrange(geneid) # make sure that they are in order! 
+
+# to check if IDs are in the same order for rawdata and gtf_filtered_2 do this: 
+same_order <- all(gtf_filtered_2$geneid == rawdata$geneid)
+
+# Print the result
+if (same_order) {
+  print("The geneid columns in gtf_filtered and rawdata are in the same order.")
+} else {
+  print("The geneid columns in gtf_filtered and rawdata are not in the same order.")
+}
+
+# Select just the count table! 
+rawdata_filt_order <- rawdata %>%
+  dplyr::select(starts_with("cyp_"))
+```
+
+
+```{r DGEList object}
+# WARNING: Before proceding with the DGEList object assembly, check if the sample metadata have been shuffled or not! 
+
+y_494 <- DGEList(counts = rawdata_filt_order, group = metadata$clone, genes = gtf_filtered_2) # Import DGEList object
+```
+
